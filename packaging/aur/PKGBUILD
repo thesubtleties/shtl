@@ -11,7 +11,7 @@ optdepends=('keyd: hold Space to open the panel'
             'ttf-jetbrains-mono-nerd: keycap legends')
 install=shtl.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP') # set once v$pkgver is tagged
+sha256sums=('01c4d279680707098062c2f8a085df95a86f7da743995de58910827889d87918')
 
 package() {
     cd "$pkgname-$pkgver"
