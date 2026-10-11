@@ -46,7 +46,19 @@ behavior, your stars and blueprints.
 
 ## Install
 
-**Arch (AUR):** `paru -S shtl` (or your AUR helper of choice), then:
+**Arch and Arch-based** (the AUR package is on its way; AUR sign-ups are paused for now):
+
+```sh
+sudo pacman -U https://github.com/thesubtleties/shtl/releases/download/v0.1.1/shtl-0.1.1-1-any.pkg.tar.zst
+```
+
+or build the same package yourself:
+
+```sh
+git clone https://github.com/thesubtleties/shtl && cd shtl/packaging/aur && makepkg -si
+```
+
+Then:
 
 ```sh
 shtl setup
