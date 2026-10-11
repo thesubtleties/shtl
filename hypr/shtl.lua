@@ -196,7 +196,13 @@ function P.save()
     end
     local f = io.open(P.store .. ".tmp", "w")
     if not f then return end
-    f:write(json.encode({ ws = out, here = P.here, last = P.last, loans = P.loans, yields = P.yields, screen_hist = P.screen_hist }))
+    -- fullscreen and maximized windows too: a config reload re-adds every window to the layout, which drops them
+    local full = {}
+    for _, w in ipairs(hl.get_windows()) do
+        if (w.fullscreen or 0) > 0 then full[w.address] = w.fullscreen end
+    end
+    f:write(json.encode({ ws = out, here = P.here, last = P.last, loans = P.loans, yields = P.yields, screen_hist = P.screen_hist,
+                          fullscreen = full }))
     f:close()
     os.rename(P.store .. ".tmp", P.store)
 end
@@ -2093,6 +2099,21 @@ hl.define_submap("shtl", function()
     hl.bind("Escape", escape, { description = "shtl: close" })
     hl.bind("catchall", function() end)
 end)
+
+-- A config reload (Caelestia's wallpaper rotation does one every few minutes) drops fullscreen and maximized
+-- windows back into the layout; put them back once the layout has taken the windows again.
+if next(stored.fullscreen or {}) then
+    hl.timer(function()
+        for address, mode in pairs(stored.fullscreen) do
+            local w = hl.get_window("address:" .. address)
+            if w and (w.fullscreen or 0) == 0 then
+                hl.dispatch(hl.dsp.window.fullscreen({ window = "address:" .. address,
+                                                       mode = mode == 1 and "maximized" or "fullscreen", action = "set" }))
+            end
+        end
+        P.save()
+    end, { timeout = 400, type = "oneshot" })
+end
 
 -- Start the panel (and, for a held trigger key, the keyd listener) with Hyprland. A config reload keeps them.
 P.root = here_dir:gsub("hypr/$", "")
