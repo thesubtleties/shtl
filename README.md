@@ -11,7 +11,7 @@ Keyboard-first window placement for [Hyprland](https://hypr.land). Open the pane
 where** (a slot, a workspace, a screen) and your **right hand picks what** (a window or an app). Two keys, no
 mouse, no memorized chords: the panel shows what every key does right now.
 
-> **Early preview (v0.1.1).** It's used daily, but expect rough edges. Issues and ideas are welcome.
+> **Early preview (v0.2.0).** It's used daily, but expect rough edges. Issues and ideas are welcome.
 
 <!-- demo: a short screen recording goes here -->
 
@@ -26,15 +26,22 @@ mouse, no memorized chords: the panel shows what every key does right now.
   launch it), hold to choose between its windows, and press `N` in that list for a new one.
 - **Constellations** are saved layouts. Press `Super+S` with the panel open to save the workspace as one, and
   `1`–`9` to come back to it. A constellation rebuilds itself from its definition every time, and it **borrows**
-  windows instead of stealing them: they keep their place on their home workspace and go back when you leave.
-- **Workspaces and screens:** `Z X C V B` are this screen's five workspaces, `Tab` goes back to the last one,
-  `Q` moves to the next screen, and `W` swaps this workspace with one on the other screen.
+  windows instead of stealing them: they keep their place where they were and stay there when you leave.
+- **Workspaces and screens:** `Z X C V B` are this screen's five workspaces, `Tab` goes back to the last one and
+  `Q` moves to the next screen. The header shows the **other screen** too: `E` / `R` flip what it shows without
+  leaving yours, and `W W` swaps this workspace with the one it's showing (`W` then `Z X C V B` for another of
+  its five). With three or more screens, `Shift+Q` picks which one that is.
 - **Lending:** tap an app key to take its window, double-tap to borrow it instead. A borrowed window can sit in
-  several workspaces at once; shtl shows it wherever it's on top and leaves a placeholder elsewhere.
+  several workspaces at once; shtl shows it wherever it's on top and leaves a placeholder elsewhere. Every copy
+  is equal: `Backspace` only lets go of it here (a window nothing else holds goes to the hidden shelf).
+- **Pick up and put down:** `Shift` + a window key picks that window up (any layer), then select a slot anywhere
+  and press `Enter`. Press it twice for a copy instead (borrowed where you put it). Optionally a mouse button
+  (click a window, click a slot) or a key of your choice does the same; the carried window wears the accent and
+  an outline shows where it would land.
 
 Everything is set in **Settings** (`Super+,` with the panel open): the trigger, look (eight popular palettes or
 your shell's), where the panel sits (top, center or bottom, with a pixel offset to clear a bar or dock),
-behavior, your stars and blueprints.
+behavior (including the pick-up button and key, and a debug log), your stars and blueprints.
 
 ## Requirements
 
@@ -49,7 +56,7 @@ behavior, your stars and blueprints.
 **Arch and Arch-based** (the AUR package is on its way; AUR sign-ups are paused for now):
 
 ```sh
-sudo pacman -U https://github.com/thesubtleties/shtl/releases/download/v0.1.1/shtl-0.1.1-1-any.pkg.tar.zst
+sudo pacman -U https://github.com/thesubtleties/shtl/releases/download/v0.2.0/shtl-0.2.0-1-any.pkg.tar.zst
 ```
 
 or build the same package yourself:
@@ -102,11 +109,13 @@ If keyd ever misbehaves, `Backspace + Escape + Enter` makes it exit.
 | Left hand: where | | Right hand: what | |
 |---|---|---|---|
 | `A S D F` | select a slot (again: next layer, hold: pick a layer) | `H J K L ;` | windows on this workspace |
-| `G` | next blueprint | `Y`–`P`, `N`–`/` | app pool (hold: pick a window, `N`: new one) |
-| `Z X C V B` | this screen's workspaces | `Backspace` | shelve the window (hold: close it) |
-| `Tab` | back to the last workspace on this screen | `Enter` | bring a window shown elsewhere here |
-| `Q` / `W` | next screen / swap workspaces across screens | `1`–`9` | constellations |
-| `Super+S` | save as a constellation | `Super+,` | settings |
+| `G` | next blueprint | `Shift` + `H J K L ;` | pick that window up (twice: a copy) |
+| `Z X C V B` | this screen's workspaces | `Y`–`P`, `N`–`/` | app pool (hold: pick a window, `N`: new one) |
+| `Tab` | back to the last workspace on this screen | `Backspace` | let go of the window here (hold: close it) |
+| `Q` | next screen (`Shift+Q`: aim at another) | `Enter` | put down what you carry, or bring a window shown elsewhere here |
+| `E` / `R` | the other screen's previous / next workspace | `1`–`9` | constellations |
+| `W` | swap with the other screen (`W` again: what it shows) | `Super+,` | settings |
+| `Super+S` | save as a constellation | | |
 
 `Space` or `Esc` closes the panel.
 

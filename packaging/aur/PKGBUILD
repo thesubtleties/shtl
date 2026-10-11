@@ -1,6 +1,6 @@
 # Maintainer: sbtl.dev
 pkgname=shtl
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Keyboard-first window placement for Hyprland: blueprints, slots, constellations and a two-hand panel"
 arch=('any')

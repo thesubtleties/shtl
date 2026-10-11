@@ -426,6 +426,116 @@ PanelWindow {
         Item { Layout.fillWidth: true }
     }
 
+    // A key or mouse button you set by pressing it: click the box, then press the key or click the button.
+    component CaptureRow: RowLayout {
+        id: cap
+        property string title
+        property string help
+        property string kind: "key" // "key" | "mouse"
+        property string label: ""   // what it's set to now; "" = nothing
+        property bool clearable: true
+        property bool capturing: false
+        property string refusal: ""
+        signal captured(string code, string name)
+        signal cleared
+        Layout.fillWidth: true
+        spacing: 24
+
+        // Hyprland's names for mouse buttons (the left one stays the panel's)
+        readonly property var buttons: ({
+            [Qt.RightButton]: ["mouse:273", "Right button"],
+            [Qt.MiddleButton]: ["mouse:274", "Middle button"],
+            [Qt.BackButton]: ["mouse:275", "Back button"],
+            [Qt.ForwardButton]: ["mouse:276", "Forward button"],
+        })
+        // Keys that type nothing and aren't shtl's own; anything else would fight the panel's keys
+        function keyName(e) {
+            if (e.key >= Qt.Key_F1 && e.key <= Qt.Key_F35) return "F" + (e.key - Qt.Key_F1 + 1)
+            const names = { [Qt.Key_CapsLock]: "Caps Lock", [Qt.Key_Insert]: "Insert", [Qt.Key_Delete]: "Delete",
+                            [Qt.Key_Home]: "Home", [Qt.Key_End]: "End", [Qt.Key_PageUp]: "Page Up",
+                            [Qt.Key_PageDown]: "Page Down", [Qt.Key_Menu]: "Menu", [Qt.Key_Pause]: "Pause",
+                            [Qt.Key_ScrollLock]: "Scroll Lock", [Qt.Key_NumLock]: "Num Lock" }
+            return names[e.key] ?? ""
+        }
+        function stop() { capturing = false; card.forceActiveFocus() }
+
+        ColumnLayout {
+            Layout.preferredWidth: 250
+            Layout.maximumWidth: 250
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: 6
+            spacing: 3
+            T {
+                Layout.fillWidth: true
+                text: cap.title
+                font.pixelSize: 14
+                font.weight: Font.Medium
+                wrapMode: Text.WordWrap
+            }
+            T {
+                Layout.fillWidth: true
+                text: cap.refusal !== "" ? cap.refusal : cap.help
+                color: cap.refusal !== "" ? win.theme.gold : win.theme.muted
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+        }
+        Rectangle {
+            id: box
+            Layout.alignment: Qt.AlignTop
+            implicitWidth: 230
+            implicitHeight: 34
+            radius: win.theme.rad(9)
+            color: cap.capturing ? win.theme.panel : win.theme.bg
+            border.color: cap.capturing ? win.theme.gold : win.theme.line
+            T {
+                anchors.centerIn: parent
+                text: cap.capturing ? (cap.kind === "mouse" ? "Click a button here" : "Press a key")
+                                    : (cap.label !== "" ? cap.label : "Not set")
+                color: cap.capturing || cap.label !== "" ? win.theme.fg : win.theme.muted
+                font.pixelSize: 13
+                font.weight: Font.Medium
+            }
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.AllButtons
+                cursorShape: Qt.PointingHandCursor
+                onPressed: mouse => {
+                    if (!cap.capturing) {
+                        if (mouse.button !== Qt.LeftButton) return
+                        cap.refusal = ""
+                        cap.capturing = true
+                        box.forceActiveFocus()
+                        return
+                    }
+                    if (cap.kind !== "mouse") return
+                    const b = cap.buttons[mouse.button]
+                    if (!b) { cap.refusal = "The left button stays the panel's. Try middle, right, back or forward."; return }
+                    cap.stop()
+                    cap.captured(b[0], b[1])
+                }
+            }
+            Keys.onPressed: e => {
+                if (!cap.capturing) return
+                e.accepted = true
+                if (e.key === Qt.Key_Escape) return cap.stop()
+                if (cap.kind !== "key") return
+                const name = cap.keyName(e)
+                if (name === "") { cap.refusal = "That key types or is one of shtl's. Try Caps Lock, an F-key, Insert or Home."; return }
+                cap.refusal = ""
+                cap.stop()
+                cap.captured("code:" + e.nativeScanCode, name)
+            }
+        }
+        Button {
+            Layout.alignment: Qt.AlignTop
+            visible: cap.capturing || (cap.clearable && cap.label !== "")
+            label: cap.capturing ? "Cancel" : "Clear"
+            onClicked: cap.capturing ? cap.stop() : cap.cleared()
+        }
+        Item { Layout.fillWidth: true }
+    }
+
     Rectangle {
         id: card
         anchors.fill: parent
@@ -629,172 +739,207 @@ PanelWindow {
                 }
             }
 
-            // Behavior ------------------------------------------------------------------------------
-            ColumnLayout {
+            // Behavior (scrolls: it has the most rows) ------------------------------------------------
+            Flickable {
                 visible: win.tab === "behavior"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 18
+                contentHeight: behaviorRows.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ColumnLayout {
+                    id: behaviorRows
+                    width: parent.width
+                    spacing: 18
 
-                OptionRow { modelData: ({ key: "trigger", title: "Open shtl with",
-                          options: [{ v: "combo", l: "Key combo", d: (win.cfg ? win.cfg.trigger_combo : "SUPER + space") + " opens and closes the panel. Nothing else to install." },
-                                    { v: "hold", l: "Hold Space", d: "Hold Space for the panel, tap it for a space. Needs keyd (runs as root); see the README." },
-                                    { v: "firmware", l: "Keyboard key", d: "Your keyboard sends " + (win.cfg ? win.cfg.trigger_firmware : "F13") + " while you hold a key (Wooting, QMK, ZMK)." }] }) }
+                    OptionRow { modelData: ({ key: "trigger", title: "Open shtl with",
+                              options: [{ v: "combo", l: "Key combo", d: (win.cfg ? win.cfg.trigger_combo : "SUPER + space") + " opens and closes the panel. Nothing else to install." },
+                                        { v: "hold", l: "Hold Space", d: "Hold Space for the panel, tap it for a space. Needs keyd (runs as root); see the README." },
+                                        { v: "firmware", l: "Keyboard key", d: "Your keyboard sends " + (win.cfg ? win.cfg.trigger_firmware : "F13") + " while you hold a key (Wooting, QMK, ZMK)." }] }) }
 
-                // Hold Space needs keyd: a card with what's in place and one command for what isn't
-                Rectangle {
-                    id: keydCard
-                    readonly property var k: win.cfg && win.cfg.keyd ? win.cfg.keyd : ({})
-                    readonly property bool ready: !!(k.installed && k.config && k.running && k.group)
-                    readonly property string command: {
-                        const steps = []
-                        if (!k.installed) steps.push("sudo pacman -S keyd")
-                        if (!k.config) steps.push("sudo cp '" + (k.conf || "") + "' /etc/keyd/shtl.conf")
-                        if (!k.running) steps.push("sudo systemctl enable --now keyd")
-                        else if (!k.config) steps.push("sudo systemctl restart keyd")
-                        if (!k.group) steps.push("sudo usermod -aG keyd \"$USER\"")
-                        return steps.join(" && ")
-                    }
-                    visible: !!win.cfg && win.cfg.trigger === "hold"
-                    Layout.leftMargin: 274
-                    Layout.topMargin: -6
-                    Layout.preferredWidth: 560
-                    implicitHeight: keydBody.implicitHeight + 28
-                    radius: win.theme.rad(9)
-                    color: win.theme.bg
-                    border.color: keydCard.ready ? win.theme.line : win.theme.goldEdge
-
-                    ColumnLayout {
-                        id: keydBody
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: 14
-                        spacing: 10
-
-                        RowLayout {
-                            spacing: 8
-                            Rectangle { // a status dot: filled when ready
-                                implicitWidth: 8
-                                implicitHeight: 8
-                                radius: 4
-                                color: keydCard.ready ? win.theme.teal : "transparent"
-                                border.color: keydCard.ready ? win.theme.teal : win.theme.gold
-                                border.width: 1.5
-                            }
-                            T {
-                                text: keydCard.ready ? "keyd is ready: hold Space for the panel, tap it for a space"
-                                                     : "keyd setup"
-                                font.pixelSize: 13
-                                font.weight: Font.Medium
-                            }
+                    // Hold Space needs keyd: a card with what's in place and one command for what isn't
+                    Rectangle {
+                        id: keydCard
+                        readonly property var k: win.cfg && win.cfg.keyd ? win.cfg.keyd : ({})
+                        readonly property bool ready: !!(k.installed && k.config && k.running && k.group)
+                        readonly property string command: {
+                            const steps = []
+                            if (!k.installed) steps.push("sudo pacman -S keyd")
+                            if (!k.config) steps.push("sudo cp '" + (k.conf || "") + "' /etc/keyd/shtl.conf")
+                            if (!k.running) steps.push("sudo systemctl enable --now keyd")
+                            else if (!k.config) steps.push("sudo systemctl restart keyd")
+                            if (!k.group) steps.push("sudo usermod -aG keyd \"$USER\"")
+                            return steps.join(" && ")
                         }
+                        visible: !!win.cfg && win.cfg.trigger === "hold"
+                        Layout.leftMargin: 274
+                        Layout.topMargin: -6
+                        Layout.preferredWidth: 560
+                        implicitHeight: keydBody.implicitHeight + 28
+                        radius: win.theme.rad(9)
+                        color: win.theme.bg
+                        border.color: keydCard.ready ? win.theme.line : win.theme.goldEdge
 
-                        Grid { // what's in place and what isn't
-                            visible: !keydCard.ready
-                            columns: 2
-                            columnSpacing: 22
-                            rowSpacing: 7
-                            Repeater {
-                                model: [
-                                    { ok: keydCard.k.installed, text: "Installed" },
-                                    { ok: keydCard.k.config, text: "shtl's file in /etc/keyd" },
-                                    { ok: keydCard.k.running, text: "Running" },
-                                    { ok: keydCard.k.group, text: "You're in the keyd group" },
-                                ]
-                                Row {
-                                    required property var modelData
-                                    spacing: 8
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 7
-                                        height: 7
-                                        radius: 3.5
-                                        color: modelData.ok ? win.theme.teal : "transparent"
-                                        border.color: modelData.ok ? win.theme.teal : win.theme.muted
-                                        border.width: 1.5
-                                    }
-                                    T {
-                                        text: modelData.text
-                                        color: modelData.ok ? win.theme.muted : win.theme.fg
-                                        font.pixelSize: 12
+                        ColumnLayout {
+                            id: keydBody
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 14
+                            spacing: 10
+
+                            RowLayout {
+                                spacing: 8
+                                Rectangle { // a status dot: filled when ready
+                                    implicitWidth: 8
+                                    implicitHeight: 8
+                                    radius: 4
+                                    color: keydCard.ready ? win.theme.teal : "transparent"
+                                    border.color: keydCard.ready ? win.theme.teal : win.theme.gold
+                                    border.width: 1.5
+                                }
+                                T {
+                                    text: keydCard.ready ? "keyd is ready: hold Space for the panel, tap it for a space"
+                                                         : "keyd setup"
+                                    font.pixelSize: 13
+                                    font.weight: Font.Medium
+                                }
+                            }
+
+                            Grid { // what's in place and what isn't
+                                visible: !keydCard.ready
+                                columns: 2
+                                columnSpacing: 22
+                                rowSpacing: 7
+                                Repeater {
+                                    model: [
+                                        { ok: keydCard.k.installed, text: "Installed" },
+                                        { ok: keydCard.k.config, text: "shtl's file in /etc/keyd" },
+                                        { ok: keydCard.k.running, text: "Running" },
+                                        { ok: keydCard.k.group, text: "You're in the keyd group" },
+                                    ]
+                                    Row {
+                                        required property var modelData
+                                        spacing: 8
+                                        Rectangle {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 7
+                                            height: 7
+                                            radius: 3.5
+                                            color: modelData.ok ? win.theme.teal : "transparent"
+                                            border.color: modelData.ok ? win.theme.teal : win.theme.muted
+                                            border.width: 1.5
+                                        }
+                                        T {
+                                            text: modelData.text
+                                            color: modelData.ok ? win.theme.muted : win.theme.fg
+                                            font.pixelSize: 12
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        Rectangle { // the missing steps as one command
-                            visible: !keydCard.ready
-                            Layout.fillWidth: true
-                            implicitHeight: commandText.implicitHeight + 16
-                            radius: win.theme.rad(7)
-                            color: win.theme.panel
-                            T {
-                                id: commandText
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                text: keydCard.command
-                                wrapMode: Text.WrapAnywhere
-                                color: win.theme.fg
-                                font.family: win.theme.mono
-                                font.pixelSize: 11
-                            }
-                        }
-
-                        RowLayout {
-                            visible: !keydCard.ready
-                            Layout.fillWidth: true
-                            spacing: 8
-                            T {
+                            Rectangle { // the missing steps as one command
+                                visible: !keydCard.ready
                                 Layout.fillWidth: true
-                                text: keydCard.k.group ? "Run it in a terminal, then check again."
-                                                       : "Run it in a terminal, then log out and in for the group."
-                                color: win.theme.muted
-                                font.pixelSize: 11
-                                wrapMode: Text.WordWrap
+                                implicitHeight: commandText.implicitHeight + 16
+                                radius: win.theme.rad(7)
+                                color: win.theme.panel
+                                T {
+                                    id: commandText
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    text: keydCard.command
+                                    wrapMode: Text.WrapAnywhere
+                                    color: win.theme.fg
+                                    font.family: win.theme.mono
+                                    font.pixelSize: 11
+                                }
                             }
-                            Button {
-                                label: "Check again"
-                                onClicked: win.theme.lua("shtl.publish()")
-                            }
-                            Button {
-                                label: copied.running ? "Copied" : "Copy command"
-                                primary: true
-                                onClicked: { Quickshell.execDetached(["wl-copy", keydCard.command]); copied.restart() }
-                                Timer { id: copied; interval: 1500 }
+
+                            RowLayout {
+                                visible: !keydCard.ready
+                                Layout.fillWidth: true
+                                spacing: 8
+                                T {
+                                    Layout.fillWidth: true
+                                    text: keydCard.k.group ? "Run it in a terminal, then check again."
+                                                           : "Run it in a terminal, then log out and in for the group."
+                                    color: win.theme.muted
+                                    font.pixelSize: 11
+                                    wrapMode: Text.WordWrap
+                                }
+                                Button {
+                                    label: "Check again"
+                                    onClicked: win.theme.lua("shtl.publish()")
+                                }
+                                Button {
+                                    label: copied.running ? "Copied" : "Copy command"
+                                    primary: true
+                                    onClicked: { Quickshell.execDetached(["wl-copy", keydCard.command]); copied.restart() }
+                                    Timer { id: copied; interval: 1500 }
+                                }
                             }
                         }
                     }
-                }
 
-                Repeater {
-                    model: [
-                        { key: "hints", title: "Key hints in the panel",
-                          options: [{ v: "show", l: "Show", d: "While you learn the keys" },
-                                    { v: "hide", l: "Hide", d: "Once you know them" }] },
-                        { key: "labels", title: "Section labels",
-                          options: [{ v: "show", l: "Show", d: "Workspaces, Constellations, Apps, On this workspace" },
-                                    { v: "hide", l: "Hide", d: "The layout speaks for itself" }] },
-                        { key: "panel_mode", title: "Letting go of Space",
-                          options: [{ v: "sticky", l: "Sticky", d: "The panel stays open; Space or Esc closes it" },
-                                    { v: "auto", l: "Auto", d: "Stays open only if you pressed nothing" },
-                                    { v: "hold", l: "Hold", d: "The panel closes" }] },
-                        { key: "tap_takes", title: "Tap on an app key or picker label",
-                          options: [{ v: "steal", l: "Steals", d: "Double-tap borrows instead" },
-                                    { v: "borrow", l: "Borrows", d: "Double-tap steals instead" }] },
-                        { key: "steal_mode", title: "Stealing a window that's lent out",
-                          options: [{ v: "full", l: "Full", d: "Here becomes its only place" },
-                                    { v: "copy", l: "Copy", d: "Take just the copy you took it from" }] },
-                        { key: "yield_return", title: "Getting a lent window back",
-                          options: [{ v: "top", l: "Back on top", d: "Unless you changed that slot's top meanwhile" },
-                                    { v: "stay", l: "Stays put", d: "Wherever it was in the stack" }] },
+                    Repeater {
+                        model: [
+                            { key: "hints", title: "Key hints in the panel",
+                              options: [{ v: "show", l: "Show", d: "While you learn the keys" },
+                                        { v: "hide", l: "Hide", d: "Once you know them" }] },
+                            { key: "labels", title: "Section labels",
+                              options: [{ v: "show", l: "Show", d: "Workspaces, Constellations, Apps, On this workspace" },
+                                        { v: "hide", l: "Hide", d: "The layout speaks for itself" }] },
+                            { key: "panel_mode", title: "Letting go of Space",
+                              options: [{ v: "sticky", l: "Sticky", d: "The panel stays open; Space or Esc closes it" },
+                                        { v: "auto", l: "Auto", d: "Stays open only if you pressed nothing" },
+                                        { v: "hold", l: "Hold", d: "The panel closes" }] },
+                            { key: "tap_takes", title: "Tap on an app key or picker label",
+                              options: [{ v: "steal", l: "Steals", d: "Double-tap borrows instead" },
+                                        { v: "borrow", l: "Borrows", d: "Double-tap steals instead" }] },
+                            { key: "steal_mode", title: "Stealing a window that's lent out",
+                              options: [{ v: "full", l: "Full", d: "Here becomes its only place" },
+                                        { v: "copy", l: "Copy", d: "Take just the copy you took it from" }] },
+                            { key: "yield_return", title: "Getting a lent window back",
+                              options: [{ v: "top", l: "Back on top", d: "Unless you changed that slot's top meanwhile" },
+                                        { v: "stay", l: "Stays put", d: "Wherever it was in the stack" }] },
+                            { key: "swap_follow", title: "Swapping workspaces (W)",
+                          options: [{ v: "stay", l: "Stay here", d: "The other workspace's windows come to you" },
+                                    { v: "go", l: "Go along", d: "You follow your windows to the other screen" }] },
                         { key: "constellation_windows", title: "Windows a recalled constellation uses",
-                          options: [{ v: "share", l: "Share", d: "Reuse open windows; launch only if there are none" },
-                                    { v: "own", l: "Own", d: "Only its own windows; otherwise launch new ones" }] },
-                    ]
-                    OptionRow {}
+                              options: [{ v: "share", l: "Share", d: "Reuse open windows; launch only if there are none" },
+                                        { v: "own", l: "Own", d: "Only its own windows; otherwise launch new ones" }] },
+                        ]
+                        OptionRow {}
+                    }
+
+                    // Pick up and put down
+                    OptionRow { modelData: ({ key: "carry_mouse", title: "Pick up with a mouse button",
+                              options: [{ v: "off", l: "Off", d: "Clicks go to your windows as usual" },
+                                        { v: "on", l: "On", d: "With the panel open, click a window to pick it up, then click the slot it goes to (any screen or workspace)" }] }) }
+                    CaptureRow {
+                        visible: win.cfg && win.cfg.carry_mouse === "on"
+                        title: "Mouse button"
+                        help: "Click the box, then click the button to use"
+                        kind: "mouse"
+                        clearable: false
+                        label: ({ "mouse:273": "Right button", "mouse:274": "Middle button", "mouse:275": "Back button",
+                                  "mouse:276": "Forward button" })[win.cfg ? win.cfg.carry_button : ""] ?? (win.cfg ? win.cfg.carry_button : "")
+                        onCaptured: (code, name) => win.edit(c => c.carry_button = code)
+                    }
+                    CaptureRow {
+                        title: "Pick up with a key"
+                        help: "Cuts the selected slot's window; select another slot (any workspace or screen) and press it again to put it there"
+                        kind: "key"
+                        label: win.cfg ? win.cfg.carry_key_label : ""
+                        onCaptured: (code, name) => win.edit(c => { c.carry_key = code; c.carry_key_label = name })
+                        onCleared: win.edit(c => { c.carry_key = ""; c.carry_key_label = "" })
+                    }
+                    OptionRow { modelData: ({ key: "debug_log", title: "Debug log",
+                              options: [{ v: "off", l: "Off", d: "Nothing is written" },
+                                        { v: "on", l: "On", d: "Every move and panel event goes to shtl-debug.log in your runtime folder (gone at logout)" }] }) }
                 }
-                Item { Layout.fillHeight: true }
             }
 
             // Stars (pinned apps) -------------------------------------------------------------------

@@ -16,7 +16,7 @@ local here_dir = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
 local json = dofile(here_dir .. "json.lua")
 local P = {}
 shtl = P -- global, so `hyprctl eval` can reach it
-P.version = "0.1.1"
+P.version = "0.2.0"
 
 -- Blueprints are split trees: a leaf is a slot ({}); a node splits its box side by side ("h") or
 -- stacked ("v") at `ratio`. Slots are the leaves in order (A S D F), at most four. The settings window
@@ -99,6 +99,7 @@ P.typeface = "fira"        -- fira | shell | mono
 P.density  = "comfortable" -- comfortable | compact
 -- Key hints in the panel, for learning the keys; turn them off once you know them.
 P.hints = "show" -- "show" | "hide"
+P.debug_log = "off" -- "on": moves, panel events and reload oddities go to $XDG_RUNTIME_DIR/shtl-debug.log
 -- Section labels in the panel (Workspaces, Constellations, Apps, On this workspace).
 P.labels = "show" -- "show" | "hide"
 -- How the panel opens. "combo": a key combo toggles it (no extra software). "hold": hold a key, via keyd (the
@@ -107,6 +108,13 @@ P.labels = "show" -- "show" | "hide"
 P.trigger          = "combo"         -- combo | hold | firmware
 P.trigger_combo    = "SUPER + space"
 P.trigger_firmware = "F13"
+-- Pick up and put down (panel open): a mouse button picks up the window under the cursor and puts it on
+-- the slot clicked next; a key cuts the selected slot's window and pastes it into the slot selected then.
+P.swap_follow     = "stay"       -- W: "stay" on this screen (the windows trade places) | "go" with your windows
+P.carry_mouse     = "off"        -- "on" | "off"
+P.carry_button    = "mouse:274"  -- middle; any button but the left one
+P.carry_key       = ""           -- "code:<xkb keycode>" (layout-proof), "" = none
+P.carry_key_label = ""           -- what Settings shows for it, e.g. "Caps Lock"
 -- Where the panel sits: "top", "center" or "bottom", and how far from that edge (pixels; for bars and docks).
 P.panel_position = "top"
 P.panel_offset   = 10
@@ -163,8 +171,9 @@ P.saving  = nil      -- nil | { confirm = n }: Super+S pressed, waiting for a nu
 
 local function letter(i) return P.slot_keys[i] or tostring(i) end
 
--- Rare oddities worth knowing about, appended to $XDG_RUNTIME_DIR/shtl-debug.log.
+-- What shtl did and rare oddities, appended to $XDG_RUNTIME_DIR/shtl-debug.log when the debug log is on.
 function P.debug(line)
+    if P.debug_log ~= "on" then return end
     local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/shtl-debug.log", "a")
     if not f then return end
     f:write(os.date("%H:%M:%S "), line, "\n")
@@ -202,7 +211,7 @@ function P.save()
         if (w.fullscreen or 0) > 0 then full[w.address] = w.fullscreen end
     end
     f:write(json.encode({ ws = out, here = P.here, last = P.last, loans = P.loans, yields = P.yields, screen_hist = P.screen_hist,
-                          fullscreen = full }))
+                          fullscreen = full, carrying = P.carry and P.carry.address or nil }))
     f:close()
     os.rename(P.store .. ".tmp", P.store)
 end
@@ -233,6 +242,9 @@ local BEHAVIOR = {
     panel_position = { "top", "center", "bottom" },
     hints         = { "show", "hide" },
     labels        = { "show", "hide" },
+    carry_mouse   = { "off", "on" },
+    swap_follow   = { "stay", "go" },
+    debug_log     = { "off", "on" },
     material      = { "solid", "frosted", "glass" },
     shape         = { "soft", "sharp", "round", "hyprland" },
     edge          = { "line", "gradient", "none" },
@@ -270,7 +282,8 @@ end
 
 function P.settings_table()
     local out = { starred = P.starred, blueprints = {}, auto = P.auto_names,
-                  trigger_combo = P.trigger_combo, trigger_firmware = P.trigger_firmware, panel_offset = P.panel_offset }
+                  trigger_combo = P.trigger_combo, trigger_firmware = P.trigger_firmware, panel_offset = P.panel_offset,
+                  carry_button = P.carry_button, carry_key = P.carry_key, carry_key_label = P.carry_key_label }
     for k in pairs(BEHAVIOR) do out[k] = P[k] end
     for _, b in ipairs(P.blueprints) do table.insert(out.blueprints, { name = b.name, tree = b.tree }) end
     return out
@@ -279,9 +292,20 @@ end
 -- Apply a settings table (anything invalid keeps its current value) and, unless loading, save it.
 local function apply(cfg, loading)
     if type(cfg) ~= "table" then return false end
-    local was_trigger = P.trigger .. P.trigger_combo .. P.trigger_firmware
+    local function binds() -- settings that change which keys and buttons are bound
+        return table.concat({ P.trigger, P.trigger_combo, P.trigger_firmware, P.carry_mouse, P.carry_button, P.carry_key }, "|")
+    end
+    local was_trigger = binds()
     for _, k in ipairs({ "trigger_combo", "trigger_firmware" }) do -- key names, e.g. "SUPER + space", "F13"
         if type(cfg[k]) == "string" and cfg[k]:match("^[%w%s%+_]+$") then P[k] = cfg[k] end
+    end
+    if type(cfg.carry_button) == "string" and cfg.carry_button:match("^mouse:%d+$") and cfg.carry_button ~= "mouse:272" then
+        P.carry_button = cfg.carry_button
+    end
+    if type(cfg.carry_key) == "string" and (cfg.carry_key == "" or cfg.carry_key:match("^code:%d+$")) then
+        P.carry_key = cfg.carry_key
+        local label = type(cfg.carry_key_label) == "string" and cfg.carry_key_label:gsub("[%c\"]", ""):sub(1, 24) or ""
+        P.carry_key_label = cfg.carry_key ~= "" and label or ""
     end
     if type(cfg.panel_offset) == "number" then P.panel_offset = math.max(0, math.min(600, math.floor(cfg.panel_offset))) end
     for k, allowed in pairs(BEHAVIOR) do
@@ -330,7 +354,7 @@ local function apply(cfg, loading)
     end
     if type(cfg.auto) == "table" and #cfg.auto > 0 then P.auto_names = cfg.auto end
     if not loading and was_trigger ~= nil then
-        P.trigger_changed = was_trigger ~= P.trigger .. P.trigger_combo .. P.trigger_firmware
+        P.trigger_changed = was_trigger ~= binds()
     end
     if not loading then
         os.execute("mkdir -p '" .. P.settings_file:match("^(.*)/[^/]*$") .. "'")
@@ -456,7 +480,60 @@ end
 
 P.state_file = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/shtl-state.json"
 
-local function short(class) return (class or "?"):match("([^.]+)$") end
+-- App names come from the launchers (.desktop files): a window class matches a desktop file id
+-- (web apps: chrome-<id>-Default is "WhatsApp Web"), its StartupWMClass, or the id's last part
+-- (ghostty -> com.mitchellh.ghostty.desktop). Earlier data dirs win, as in a launcher. A class with
+-- no launcher keeps the last part of the class (org.foo.Bar -> Bar).
+local app_names, names_scanned = nil, 0
+local function scan_app_names()
+    local home = os.getenv("XDG_DATA_HOME") or (os.getenv("HOME") .. "/.local/share")
+    local dirs = { home }
+    for d in (os.getenv("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"):gmatch("[^:]+") do
+        table.insert(dirs, d)
+    end
+    local by_id, by_wmclass, by_tail = {}, {}, {}
+    for _, d in ipairs(dirs) do
+        local p = io.popen("awk -F= 'FNR==1{s=\"\"} /^\\[/{s=$0} s==\"[Desktop Entry]\" && ($1==\"Name\"||$1==\"StartupWMClass\")"
+            .. "{print FILENAME \"\\t\" $1 \"\\t\" substr($0, index($0, \"=\") + 1)}' '"
+            .. d:gsub("'", "") .. "'/applications/*.desktop 2>/dev/null")
+        if p then
+            local names, wmclass = {}, {}
+            for line in p:lines() do
+                local file, key, value = line:match("^([^\t]+)\t([^\t]+)\t(.*)$")
+                if file then
+                    if key == "Name" then names[file] = names[file] or value
+                    else wmclass[file] = wmclass[file] or value end
+                end
+            end
+            p:close()
+            for file, name in pairs(names) do
+                local id = file:match("([^/]+)%.desktop$"):lower()
+                by_id[id] = by_id[id] or name
+                local tail = id:match("([^.]+)$")
+                by_tail[tail] = by_tail[tail] or name
+                local wm = wmclass[file] and wmclass[file]:lower()
+                if wm and wm ~= "" then by_wmclass[wm] = by_wmclass[wm] or name end
+            end
+        end
+    end
+    app_names, names_scanned = { id = by_id, wmclass = by_wmclass, tail = by_tail }, os.time()
+end
+
+local function short(class)
+    if not class or class == "" then return "?" end
+    local key = class:lower()
+    -- an app installed since the last look: scan again (at most every 30 s)
+    local bare = key:gsub("%-electron$", "") -- Electron apps often name their window "<app>-electron"
+    local function find()
+        if not app_names then return nil end
+        for _, k in ipairs({ key, bare }) do
+            local n = app_names.id[k] or app_names.wmclass[k] or app_names.tail[k]
+            if n then return n end
+        end
+    end
+    if not find() and (not app_names or os.time() - names_scanned > 30) then scan_app_names() end
+    return find() or class:match("([^.]+)$")
+end
 local LABELS = { semicolon = ";", comma = ",", period = ".", slash = "/" }
 P.shelf = "special:shtl-shelf" -- Backspace tap parks windows here (shtl's minimize)
 local function ws_label(name)
@@ -497,6 +574,27 @@ end
 local function screen_workspace(k)
     local mon = hl.get_active_monitor()
     return (screen_index(mon and mon.name) - 1) * #P.workspace_keys + k
+end
+
+-- The aim: the screen E, R and W act on, shown in the panel header. The next screen to the right
+-- (wrapping) unless Shift+Q pointed somewhere else; never the screen you're on.
+P.aim = nil -- a monitor name, or nil for the default
+local function aim_screen()
+    local list = screens()
+    if #list < 2 then return nil end
+    local here = hl.get_active_monitor()
+    local hn = here and here.name
+    for _, m in ipairs(list) do
+        if m.name == P.aim and m.name ~= hn then return m end
+    end
+    return list[screen_index(hn) % #list + 1]
+end
+
+-- The five workspace names a screen owns (screens left to right own 1-5, 6-10, ...).
+local function screen_names(m)
+    local base, names = (screen_index(m.name) - 1) * #P.workspace_keys, {}
+    for k = 1, #P.workspace_keys do table.insert(names, tostring(base + k)) end
+    return names
 end
 
 -- Z X C V B are "this screen's five workspaces": screens left to right own 1-5, 6-10, ... so tie each workspace
@@ -584,6 +682,9 @@ local function held_windows(name)
 end
 
 function P.publish(message)
+    if P.hopping then return end -- E / R mid-hop: only the end state is drawn
+    if not message and P.carry then message = P.carry.say end -- still carrying (e.g. after X/C/V)
+    if message and message ~= "" then P.debug("say: " .. message) end -- every move, for "what just happened?"
     local ws  = hl.get_active_workspace()
     local mon = hl.get_active_monitor()
     local out = {
@@ -646,6 +747,15 @@ function P.publish(message)
         name = mon and screen_label(mon) or "", index = idx, count = #list,
         next = #list > 1 and screen_label(nxt) or false,
     }
+    local aimed = aim_screen()
+    out.aim = false
+    if aimed then
+        local showing = aimed.active_workspace and aimed.active_workspace.name
+        out.aim = { name = screen_label(aimed), workspaces = {} }
+        for _, n in ipairs(screen_names(aimed)) do
+            table.insert(out.aim.workspaces, { name = n, showing = n == showing, used = #hl.get_workspace_windows(n) > 0 })
+        end
+    end
 
     out.workspaces = {}
     for k, key in ipairs(P.workspace_keys) do
@@ -736,6 +846,13 @@ function P.publish(message)
     end
 
     out.placeholders = P.placeholders and P.placeholders() or {}
+    -- the drop preview, and whether the panel still has to tell us its accent color
+    out.carry_target = P.carry_target and P.carry_target() or nil
+    if P.carry then
+        local t = out.carry_target
+        P.carry.seen = t and (t.monitor .. t.slot .. t.at) or ""
+    end
+    out.accent_needed = P.accent == nil
     P.save()
     local tmp = P.state_file .. ".tmp"
     local f = io.open(tmp, "w")
@@ -1053,12 +1170,12 @@ P.double_ms   = 300
 P.last_assign = nil -- set by assign(): where the window it just took came from
 P.tapped      = nil -- { key, undo } for P.double_ms after a tap that took a window
 
-local function borrow_instead(u)
+local function borrow_instead(u, dest) -- dest: where it was put (default: the active workspace)
     if not u then return end
     P.debug("borrow: " .. tostring(u.class) .. " " .. tostring(u.address) .. " from " .. tostring(u.from)
         .. " to " .. tostring((hl.get_active_workspace() or {}).name))
     if u.launch then return P.publish("launching: nothing to borrow yet") end
-    local here = (hl.get_active_workspace() or {}).name
+    local here = dest or (hl.get_active_workspace() or {}).name
     if not here or not is_managed({ name = u.from }) then
         return P.publish(short(u.class) .. " came from " .. ws_label(u.from or "?") .. ": it's yours now")
     end
@@ -1073,7 +1190,7 @@ local function borrow_instead(u)
     if l.home ~= here then l.at[here] = true end
     P.loans[u.address] = l
     P.settle(nil, { [u.address] = here })
-    P.publish(short(u.class) .. " borrowed from " .. ws_label(l.home))
+    P.publish(short(u.class) .. " borrowed from " .. ws_label(u.from))
 end
 
 -- Turn a borrow (made from `u`, see borrow_instead) into a steal, by the same rule as a single-tap steal.
@@ -1236,31 +1353,42 @@ local function selected_top()
     return ws, s, a
 end
 
--- A lent window isn't shelved: a borrowed copy goes home (it leaves this stack), and at home the
--- loans end (it leaves every borrower). Works on its placeholder layer too.
-local function give_back(ws, s, a)
+-- A window other workspaces hold too: this one lets go and it lives on with them; nothing changes in
+-- their stacks. Every copy is equal: "home" is only where the window is parked while no screen shows
+-- it, so letting go there hands that to another holder (one showing it, if any). Works on a placeholder.
+local function let_go(ws, s, a)
     local l = P.loans[a]
     local w = win_info(a)
     local name = w and w.class or "window"
-    for holder in pairs(l.at) do
-        if holder == ws.name or l.home == ws.name then
-            l.at[holder] = nil
-            if P.ws[holder] and holder ~= l.home then remove(P.ws[holder], a) end
-            if P.yields[holder] then P.yields[holder][a] = nil end
+    if l.home == ws.name then
+        local shown, heir = {}, nil
+        for _, m in ipairs(hl.get_monitors()) do
+            if m.active_workspace then shown[m.active_workspace.name] = true end
         end
+        for holder in pairs(l.at) do
+            if shown[holder] then heir = holder break end
+        end
+        heir = heir or next(l.at)
+        l.home, l.at[heir] = heir, nil
+    else
+        l.at[ws.name] = nil
     end
-    P.settle(nil, { [a] = l.home == ws.name and ws.name or nil })
+    remove(s, a)
+    if P.yields[ws.name] then P.yields[ws.name][a] = nil end
+    local others = { l.home }
+    for holder in pairs(l.at) do table.insert(others, ws_label(holder)) end
+    others[1] = ws_label(others[1])
+    P.settle()
     refresh(s)
-    if l.home == ws.name then return P.publish(name .. ": loans ended, it's only here now") end
-    local now = hl.get_window("address:" .. a)
-    P.publish(name .. " went back to " .. ws_label(now and now.workspace and now.workspace.name or l.home))
+    P.publish(name .. " let go here (still on " .. table.concat(others, ", ") .. ")")
 end
 
 function P.shelve()
     local ws, s, a = selected_top()
     if not ws then return P.publish() end
     if not a then return P.publish(letter(s.sel) .. " is empty") end
-    if P.loans[a] then return give_back(ws, s, a) end
+    if P.loans[a] and (P.loans[a].home ~= ws.name or next(P.loans[a].at)) then return let_go(ws, s, a) end
+    if P.loans[a] then P.end_loan(a, ws.name) end -- held only here after all: an ordinary window
     local w = win_info(a)
     remove(s, a)
     hl.dispatch(hl.dsp.window.move({ workspace = P.shelf, window = "address:" .. a, follow = false }))
@@ -1270,6 +1398,7 @@ end
 
 -- Enter on a lent window's placeholder: show it here; the screen that had it yields instead.
 function P.pull_here()
+    if P.carry and P.put_down_here() then return end -- carrying: Enter puts it down here
     local ws, s, a = selected_top()
     if not ws then return P.publish() end
     local w = a and hl.get_window("address:" .. a)
@@ -1293,6 +1422,7 @@ end
 
 function P.go_workspace(k)
     local n = screen_workspace(k)
+    P.debug("go workspace " .. tostring(n) .. (P.carry and " (carrying)" or ""))
     hl.dispatch(hl.dsp.focus({ workspace = n }))
     P.publish() -- the lit chip says where you are
 end
@@ -1335,33 +1465,77 @@ function P.drag_workspace(a, b)
     P.publish(a .. " ⇄ " .. b)
 end
 
-function P.start_swap()
-    local list = screens()
-    if #list < 2 then return P.publish("only one screen") end
-    local from = hl.get_active_workspace()
-    local mon = hl.get_active_monitor()
-    if not (from and mon) then return end
-    local other = list[screen_index(mon.name) % #list + 1]
-    hl.dispatch(hl.dsp.focus({ monitor = other.name }))
+-- W: trade this workspace's whole arrangement with one on the aimed screen: W again = the one it's
+-- showing, Z X C V B = one of its five. "stay" keeps you here (its windows come to you); "go" moves you
+-- with yours.
+local function swap_with(from, name)
+    if from == name then return P.publish("that's this workspace") end
+    P.swap_workspaces(from, name, P.swap_follow == "go" and name or false)
+    P.publish("swapped " .. from .. " ⇄ " .. name)
+end
 
-    local base, names = (screen_index(other.name) - 1) * #P.workspace_keys, {}
-    for k = 1, #P.workspace_keys do table.insert(names, tostring(base + k)) end
-    open_picker("Swap workspace " .. from.name .. " with", names, function(name)
-        P.swap_workspaces(from.name, name)
-        P.publish("swapped " .. from.name .. " ⇄ " .. name)
+function P.start_swap()
+    local m = aim_screen()
+    if not m then return P.publish("only one screen") end
+    local from = hl.get_active_workspace()
+    if not is_managed(from) then return P.publish() end
+    local showing = m.active_workspace and m.active_workspace.name
+    open_picker("Swap " .. from.name .. " with " .. screen_label(m) .. "'s", screen_names(m), function(name)
+        swap_with(from.name, name)
     end, {
         labels = P.workspace_keys,
-        cancel = function() hl.dispatch(hl.dsp.focus({ workspace = from.name })) end,
+        extras = showing and { { label = "W", text = "the one it's showing (" .. showing .. ")",
+                                 run = function() swap_with(from.name, showing) end } } or nil,
         display = function(name)
             local apps = {}
             for _, w in ipairs((held_windows(name))) do table.insert(apps, short(w.class)) end
             return {
                 class = "workspace " .. name,
                 title = #apps > 0 and table.concat(apps, ", ") or "empty",
-                where = other.active_workspace and other.active_workspace.name == name and "showing" or "",
+                where = name == showing and "showing" or "",
             }
         end,
     })
+end
+
+-- Shift+Q: aim at the next screen (you stay where you are).
+function P.next_aim()
+    local list = screens()
+    if #list < 2 then return P.publish("only one screen") end
+    local here = hl.get_active_monitor()
+    local i = screen_index(aim_screen().name)
+    for step = 1, #list do
+        local m = list[(i - 1 + step) % #list + 1]
+        if m.name ~= (here and here.name) then
+            P.aim = m.name
+            break
+        end
+    end
+    P.publish("aiming at " .. screen_label(aim_screen()))
+end
+
+-- E / R: the aimed screen shows its previous / next workspace (wrapping); you stay where you are.
+function P.aim_cycle(step)
+    local m = aim_screen()
+    if not m then return P.publish("only one screen") end
+    local names, cur = screen_names(m), m.active_workspace and m.active_workspace.name
+    local at = 0
+    for k, n in ipairs(names) do if n == cur then at = k end end
+    local target = names[((at == 0 and (step > 0 and 0 or 1) or at) - 1 + step) % #names + 1]
+    -- Hop over and back (Monitor:set_workspace reports success but doesn't switch, Hyprland 0.56.2).
+    -- No redraws mid-hop: the panel follows the focused screen and would fly over and back.
+    -- The cursor goes back where it was too (focusing warps it).
+    local here, cursor = hl.get_active_monitor(), hl.get_cursor_pos()
+    P.hopping = true
+    local ok, err = pcall(function()
+        hl.dispatch(hl.dsp.focus({ workspace = tonumber(target) or target }))
+        if here then hl.dispatch(hl.dsp.focus({ monitor = here.name })) end
+        focus_selected()
+        if cursor then hl.dispatch(hl.dsp.cursor.move({ x = cursor.x, y = cursor.y })) end
+    end)
+    P.hopping = false
+    if not ok then P.debug("aim hop failed: " .. tostring(err)) end
+    P.publish()
 end
 
 function P.go_screen(name)
@@ -1908,6 +2082,7 @@ end
 -- Hold / sticky --------------------------------------------------------------------------------
 
 function P.hold()
+    P.debug("panel: hold (" .. P.mode .. ")")
     if P.mode == "closed" then P.mode = "held" end
     if not P.origin then
         P.origin = P.here
@@ -1933,6 +2108,7 @@ function P.firmware_down()
 end
 
 function P.release()
+    P.debug("panel: release (" .. P.mode .. ")")
     if P.renaming or P.settings_open then return end -- typing; don't close under it
     if P.press then -- Space let go before the key: that was a tap
         local p = P.press
@@ -1956,13 +2132,217 @@ function P.release()
 end
 
 function P.close()
+    P.debug("panel: close")
     P.renaming, P.settings_open = nil, false
     if P.picker then cancel_picker() end
     P.mode, P.used, P.origin, P.origin_screen, P.saving = "closed", false, nil, nil, nil
     P.picker, P.press, P.close_after_pick = nil, nil, false
+    if P.carry then P.end_carry() end
     hl.dispatch(hl.dsp.submap("reset"))
     focus_selected() -- what's lit is what you type into
     P.publish()
+end
+
+-- Middle click (panel open): click a window to pick it up, then click another slot (either screen, any
+-- workspace) and it goes on top there, as if put there with a key. Clicking the same slot: nothing.
+
+local function inside(pos, b) return pos.x >= b.x and pos.x < b.x + b.w and pos.y >= b.y and pos.y < b.y + b.h end
+
+local function over_panel(pos)
+    for _, l in ipairs(hl.get_layers({ namespace = "shtl" }) or {}) do
+        if l.mapped and inside(pos, l) then return true end
+    end
+    return false
+end
+
+-- The slot under a point: the workspace shown on that screen, its state, and the slot number.
+-- A workspace's laid-out area. An empty one has none yet: every workspace on a screen has the same
+-- one, so borrow it from one that does (else the whole screen).
+local function ws_area(s, mon)
+    if s.area then return s.area end
+    local sc = mon.scale and mon.scale > 0 and mon.scale or 1
+    local screen = { x = mon.x, y = mon.y, w = mon.width / sc, h = mon.height / sc }
+    for _, other in pairs(P.ws) do
+        if other.area and inside({ x = other.area.x, y = other.area.y }, screen) then return other.area end
+    end
+    return screen
+end
+
+local function slot_at(pos)
+    if not pos or over_panel(pos) then return nil end
+    local mon = hl.get_monitor_at(pos.x, pos.y)
+    local ws = mon and hl.get_active_workspace(mon)
+    if not is_managed(ws) then return nil end
+    local s = state(ws.name)
+    local area = ws_area(s, mon)
+    for i, frac in ipairs(P.blueprints[s.bp].slots) do
+        if inside(pos, slot_box(area, frac, 0)) then return ws, s, i, mon end
+    end
+    return nil
+end
+
+-- While carrying: the window wears the accent on its border, and a mouse carry follows the cursor
+-- (Hyprland has no pointer-motion event for Lua, so a timer looks while carrying).
+P.accent = nil -- "rgb(rrggbb)", sent by the panel (it knows the palette)
+function P.set_accent(hex)
+    local h = type(hex) == "string" and hex:match("(%x%x%x%x%x%x)$")
+    if h then P.accent = "rgb(" .. h .. ")" end
+end
+
+local function mark(address, on)
+    local color = on and (P.accent or "rgb(cba6f7)") or "unset"
+    for _, prop in ipairs({ "active_border_color", "inactive_border_color" }) do
+        hl.dispatch(hl.dsp.window.set_prop({ prop = prop, value = color, window = "address:" .. address }))
+    end
+end
+
+-- Where the carried window would land now: the slot under the cursor (mouse) or the selected one (key).
+local function carry_target()
+    local c = P.carry
+    if not c then return nil end
+    local ws, s, i, mon
+    if c.by == "mouse" then
+        ws, s, i, mon = slot_at(hl.get_cursor_pos())
+    else
+        ws, s = current()
+        i, mon = s and s.sel, hl.get_active_monitor()
+    end
+    if not (ws and mon and i) or (ws.name == c.ws and i == c.slot) then return nil end
+    local box = slot_box(ws_area(s, mon), P.blueprints[s.bp].slots[i], gaps_in())
+    return { monitor = mon.name, x = box.x - mon.x, y = box.y - mon.y, w = box.w, h = box.h,
+             slot = letter(i), at = ws.name ~= c.ws and ws_label(ws.name) or "", class = c.class }
+end
+P.carry_target = carry_target
+
+local function target_key(t) return t and (t.monitor .. t.slot .. t.at) or "" end
+
+local function track(on)
+    if on and not P.carry_timer then
+        P.carry_timer = hl.timer(function()
+            if not P.carry then return P.carry_timer:set_enabled(false) end
+            local k = target_key(carry_target())
+            if k ~= P.carry.seen then P.publish() end
+        end, { timeout = 50, type = "repeat" })
+    end
+    if P.carry_timer then P.carry_timer:set_enabled(on) end
+end
+
+local function carry_say(c) return (c.copy and "carrying a copy of " or "carrying ") .. c.class .. ": " .. c.hint end
+
+-- by: what the preview follows ("mouse": the cursor, "key": the selected slot); source: what picked it
+-- up, so the same press again soon after (P.double_ms, like a double-tap) makes it a copy instead.
+local function begin_carry(a, ws_name, slot, by, hint, source)
+    local w = hl.get_window("address:" .. a)
+    local c = { address = a, ws = ws_name, slot = slot, by = by, class = short(w and w.class), hint = hint,
+                source = source, copy = P.tap_takes == "borrow", fresh = true }
+    c.say = carry_say(c)
+    P.carry = c
+    hl.timer(function() c.fresh = false end, { timeout = P.double_ms, type = "oneshot" })
+    mark(a, true)
+    track(by == "mouse")
+    P.publish(c.say)
+end
+
+-- The same press again right away, on the same slot: a copy (borrowed where it's put down) instead.
+local function second_press(source, ws_name, slot)
+    local c = P.carry
+    if not (c and c.fresh and c.source == source and c.ws == ws_name and c.slot == slot) then return false end
+    c.copy, c.fresh = not c.copy, false
+    c.say = carry_say(c)
+    P.publish(c.say)
+    return true
+end
+
+-- How a key carry is put down: Enter, or the pick-up key if there is one.
+local function key_hint()
+    return "select a slot, then Enter" .. (P.carry_key ~= "" and " or " .. P.carry_key_label or "")
+end
+
+-- Stop carrying (dropped, put back or canceled): the border and the preview go.
+local function end_carry()
+    local c = P.carry
+    P.carry = nil
+    track(false)
+    if c and hl.get_window("address:" .. c.address) then mark(c.address, false) end
+    return c
+end
+P.end_carry = end_carry
+if stored.carrying and hl.get_window("address:" .. stored.carrying) then mark(stored.carrying, false) end
+
+-- Put a carried window (already let go of: end_carry) on slot i of ws: on top, as a key would; a copy
+-- is borrowed there instead, and stays where it was too.
+local function put_down(c, ws, s, i)
+    local w = c and hl.get_window("address:" .. c.address)
+    if not w then return P.publish() end
+    if ws.name == c.ws and i == c.slot then return P.publish("put back") end
+    s.sel = i
+    P.last_assign = nil
+    assign(ws, s, c.address)
+    local u = P.last_assign
+    P.last_assign = nil
+    if c.copy and u and u.address == c.address then return borrow_instead(u, ws.name) end
+    P.publish(short(w.class) .. " → " .. letter(i) .. (ws.name ~= c.ws and " on " .. ws_label(ws.name) or ""))
+end
+
+-- Enter while carrying: put it on the selected slot.
+function P.put_down_here()
+    local ws, s = current()
+    if not (ws and P.carry) then return false end
+    put_down(end_carry(), ws, s, s.sel)
+    return true
+end
+
+function P.carry_start(pos) -- pos: for tests; the cursor otherwise
+    local ws, s, i = slot_at(pos or hl.get_cursor_pos())
+    local a = ws and top(s, i)
+    if not a then return end
+    begin_carry(a, ws.name, i, "mouse", "click a slot to put it there", "mouse")
+end
+
+function P.carry_drop(pos)
+    pos = pos or hl.get_cursor_pos()
+    local ws, s, i = slot_at(pos)
+    P.debug("drop: carrying " .. tostring(P.carry and P.carry.address) .. " at " .. (pos and (math.floor(pos.x) .. "," .. math.floor(pos.y)) or "?")
+        .. " -> " .. (ws and (ws.name .. " slot " .. i) or "no slot"))
+    if ws and second_press("mouse", ws.name, i) then return end
+    local c = end_carry()
+    if not c then return end
+    if not ws then return P.publish() end
+    put_down(c, ws, s, i)
+end
+
+-- The pick-up key: the selected slot's top window; pressed again it puts down on the selected slot
+-- (any workspace or screen). Mixes with the mouse button either way.
+function P.carry_key_press()
+    P.used = true
+    local ws, s = current()
+    if not ws then return P.publish() end
+    if P.carry then
+        if second_press("key", ws.name, s.sel) then return end
+        return put_down(end_carry(), ws, s, s.sel)
+    end
+    local a = top(s, s.sel)
+    if not a then return P.publish("nothing in " .. letter(s.sel) .. " to pick up") end
+    begin_carry(a, ws.name, s.sel, "key", key_hint(), "key")
+end
+
+-- Shift + H J K L ;: pick up that window, whatever layer it's in.
+function P.pick_window(k)
+    P.used = true
+    local ws, s = current()
+    if not ws then return P.publish() end
+    local w = workspace_windows(ws.name)[k]
+    if not w then return P.publish("no window " .. k .. " on this workspace") end
+    local slot = find(s, w.address) or s.sel
+    if P.carry and P.carry.address == w.address and second_press("window" .. k, ws.name, slot) then return end
+    if P.carry then end_carry() end
+    begin_carry(w.address, ws.name, slot, "key", key_hint(), "window" .. k)
+end
+
+-- The pick-up mouse button: first click picks up, the next one puts down (twice right away: a copy).
+function P.carry_click()
+    P.used = true
+    if P.carry then P.carry_drop() else P.carry_start() end
 end
 
 -- Keys -----------------------------------------------------------------------------------------
@@ -1988,6 +2368,8 @@ for n = 1, 9 do actions[tostring(n)] = function() P.recall(n) end end
 actions.BackSpace = { tap = P.shelve, long = P.close_window, long_ms = 600 }
 actions.Q = { tap = P.next_screen, long = P.screen_picker }
 actions.W = P.start_swap
+actions.E = function() P.aim_cycle(-1) end
+actions.R = function() P.aim_cycle(1) end
 actions.G   = P.cycle_blueprint
 actions.Return = P.pull_here
 actions.Tab = P.kick
@@ -2080,6 +2462,12 @@ end, { submap_universal = true, description = "shtl (held): save constellation" 
 hl.bind(HELD .. "SUPER + comma", P.open_settings, { submap_universal = true, description = "shtl (held): settings" })
 
 hl.bind(HELD .. "Escape", escape, { submap_universal = true, description = "shtl: close" })
+if P.carry_mouse == "on" then
+    hl.bind(HELD .. P.carry_button, P.carry_click, { submap_universal = true, description = "shtl (held): pick up / put down" })
+end
+if P.carry_key ~= "" then
+    hl.bind(HELD .. P.carry_key, P.carry_key_press, { submap_universal = true, description = "shtl (held): cut / paste" })
+end
 end
 
 -- Sticky: plain keys until Space or Esc. Everything else is swallowed so it doesn't type into windows.
@@ -2093,10 +2481,22 @@ hl.define_submap("shtl", function()
     for i, key in ipairs(P.slot_keys) do -- Shift + slot key = previous layer
         hl.bind("SHIFT + " .. key, function() P.slot_key(i, true) end, { description = "shtl (sticky): previous layer" })
     end
+    for k, key in ipairs(P.window_keys) do -- Shift + window key = pick that window up
+        hl.bind("SHIFT + " .. key, function() P.pick_window(k) end, { description = "shtl (sticky): pick up window " .. k })
+    end
+    hl.bind("SHIFT + Q", P.next_aim, { description = "shtl (sticky): aim at the next screen" })
     hl.bind("SUPER + S", P.start_save, { description = "shtl (sticky): save constellation" })
     hl.bind("SUPER + comma", P.open_settings, { description = "shtl (sticky): settings" })
     hl.bind("space", P.close, { description = "shtl: close" })
     hl.bind("Escape", escape, { description = "shtl: close" })
+    -- Pick up and put down. Two clicks, not a drag: Hyprland loses a mouse button's release once the
+    -- mouse moved or a key was pressed.
+    if P.carry_mouse == "on" then
+        hl.bind(P.carry_button, P.carry_click, { description = "shtl: pick up a window / put it on a slot" })
+    end
+    if P.carry_key ~= "" then
+        hl.bind(P.carry_key, P.carry_key_press, { description = "shtl: cut / paste the selected slot's window" })
+    end
     hl.bind("catchall", function() end)
 end)
 

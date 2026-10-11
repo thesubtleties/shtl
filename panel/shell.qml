@@ -48,6 +48,12 @@ ShellRoot {
         while (text.indexOf("]" + eq + "]") >= 0) eq += "="
         return "[" + eq + "[" + text + "]" + eq + "]"
     }
+    // The carried window's border wears the accent; Lua doesn't know the palette, so tell it (again
+    // after a config reload, which forgets it).
+    function sendAccent() { lua("shtl.set_accent(\"" + gold.toString() + "\")") }
+    onGoldChanged: sendAccent()
+    readonly property bool accentNeeded: st.accent_needed ?? false
+    onAccentNeededChanged: if (accentNeeded) sendAccent()
     readonly property string mono: "JetBrainsMono NF"      // keycap legends only
     readonly property string sans: theme.sans
     readonly property string condensed: theme.condensed
@@ -173,6 +179,59 @@ ShellRoot {
                             color: root.muted
                             font.pixelSize: 12
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Where a carried window would land: an outline over that slot, on whichever screen it's on.
+    // Above the windows but click-through, so the click that puts it down still reaches shtl.
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
+            id: dropping
+            required property var modelData
+            readonly property var target: root.st.carry_target && root.st.carry_target.monitor === modelData.name
+                                          ? root.st.carry_target : null
+
+            screen: modelData
+            visible: target !== null
+            anchors { top: true; bottom: true; left: true; right: true }
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "shtl-drop"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            color: "transparent"
+            mask: Region {}
+
+            Rectangle {
+                visible: dropping.target !== null
+                x: dropping.target ? dropping.target.x : 0
+                y: dropping.target ? dropping.target.y : 0
+                width: dropping.target ? dropping.target.w : 0
+                height: dropping.target ? dropping.target.h : 0
+                radius: root.rad(12)
+                color: Qt.rgba(root.gold.r, root.gold.g, root.gold.b, 0.12)
+                border.color: root.gold
+                border.width: 3
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: dropLabel.implicitWidth + 28
+                    height: dropLabel.implicitHeight + 14
+                    radius: root.rad(9)
+                    color: root.card
+                    border.color: root.gold
+                    T {
+                        id: dropLabel
+                        anchors.centerIn: parent
+                        text: dropping.target ? dropping.target.class + " → " + dropping.target.slot
+                                                + (dropping.target.at !== "" ? " on " + dropping.target.at : "") : ""
+                        color: root.fg
+                        font.pixelSize: 18
+                        font.weight: Font.DemiBold
                     }
                 }
             }
@@ -360,14 +419,46 @@ ShellRoot {
                     }
 
                     Item { Layout.fillWidth: true }
+                    // The aimed screen (Q goes there, Shift+Q aims at the next): its name and five
+                    // workspaces, the one it shows lit. E / R flip it, W swaps with it.
                     Keycap {
-                        visible: !!(root.st.screen && root.st.screen.next)
+                        visible: !!root.st.aim
                         label: "Q"
                     }
                     Muted {
-                        visible: !!(root.st.screen && root.st.screen.next)
-                        text: "→ " + (root.st.screen ? root.st.screen.next : "")
+                        visible: !!root.st.aim
+                        text: "→ " + (root.st.aim ? root.st.aim.name : "")
                         font.pixelSize: 11
+                    }
+                    Keycap {
+                        visible: !!root.st.aim
+                        label: "E"
+                    }
+                    Row {
+                        visible: !!root.st.aim
+                        spacing: 3
+                        Repeater {
+                            model: root.st.aim ? root.st.aim.workspaces : []
+                            Rectangle {
+                                required property var modelData
+                                width: 22
+                                height: 22
+                                radius: root.rad(5)
+                                color: modelData.showing ? root.goldSoft : root.panel
+                                border.color: modelData.showing ? root.gold : root.line
+                                T {
+                                    anchors.centerIn: parent
+                                    text: modelData.name
+                                    color: modelData.showing || modelData.used ? root.fg : root.muted
+                                    font.pixelSize: 11
+                                    font.weight: modelData.showing ? Font.DemiBold : Font.Normal
+                                }
+                            }
+                        }
+                    }
+                    Keycap {
+                        visible: !!root.st.aim
+                        label: "R"
                     }
                     T { // settings (also Super+,)
                         text: "⚙"
