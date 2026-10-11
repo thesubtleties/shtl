@@ -1,0 +1,23 @@
+# Maintainer: sbtl.dev
+pkgname=shtl
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Keyboard-first window placement for Hyprland: blueprints, slots, constellations and a two-hand panel"
+arch=('any')
+url="https://github.com/thesubtleties/shtl"
+license=('GPL-3.0-or-later')
+depends=('hyprland>=0.56' 'quickshell' 'ttf-fira-sans')
+optdepends=('keyd: hold Space to open the panel'
+            'ttf-jetbrains-mono-nerd: keycap legends')
+install=shtl.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # set with updpkgsums once v$pkgver is tagged
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -d "$pkgdir/usr/share/shtl"
+    cp -r hypr panel bin extras "$pkgdir/usr/share/shtl/"
+    chmod 755 "$pkgdir/usr/share/shtl/bin/shtl-listen"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

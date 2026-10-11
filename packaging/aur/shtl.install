@@ -1,0 +1,9 @@
+post_install() {
+    echo "==> To turn shtl on, add this line to ~/.config/hypr/hyprland.lua and reload Hyprland:"
+    echo "      dofile(\"/usr/share/shtl/hypr/shtl.lua\")"
+    echo "==> Super+Space opens the panel; Super+, (with it open) for settings. See /usr/share/doc/shtl/README.md"
+}
+
+post_upgrade() {
+    echo "==> shtl updated: reload Hyprland (hyprctl reload) to load the new version."
+}

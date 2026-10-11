@@ -1,0 +1,22 @@
+#!/bin/sh
+# Copyright (C) 2026 sbtl.dev. shtl is free software under the GNU GPL v3 or later; see LICENSE.
+# Forward keyd's "shtl" layer (hold the trigger key) to shtl in Hyprland: +shtl -> shtl.hold(), -shtl -> shtl.release().
+# Started from Hyprland; reconnects if keyd is stopped and started again. Only needed for trigger = "hold".
+
+listen() {
+    if id -nG | grep -qw keyd; then
+        keyd listen
+    else
+        echo 'keyd listen' | newgrp keyd # group added after this session started
+    fi
+}
+
+while :; do
+    listen 2>/dev/null | while IFS= read -r line; do
+        case $line in
+            +shtl | +penrose) hyprctl eval 'shtl.hold()' >/dev/null ;;      # (and an older layer name)
+            -shtl | -penrose) hyprctl eval 'shtl.release()' >/dev/null ;;
+        esac
+    done
+    sleep 2
+done
