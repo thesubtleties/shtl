@@ -1,0 +1,98 @@
+#!/bin/sh
+# Copyright (C) 2026 sbtl.dev. shtl is free software under the GNU GPL v3 or later; see LICENSE.
+# shtl setup: add shtl to your Hyprland config (it shows the exact change and asks first). --undo takes it out.
+
+set -e
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+CORE="$ROOT/hypr/shtl.lua"
+MARK="-- shtl: keyboard-first window placement (https://github.com/thesubtleties/shtl). 'shtl setup --undo' removes it."
+LINE="dofile(\"$CORE\")"
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+usage() {
+    echo "usage: shtl setup          add shtl to your Hyprland config (shows the change, asks first)"
+    echo "       shtl setup --undo   take it out again"
+    echo "       shtl --version"
+}
+
+# Which file to change: Caelestia replaces hyprland.lua on updates, so its users get hypr-user.lua.
+target() {
+    if [ -f "$CONF/caelestia/hypr-user.lua" ]; then
+        TARGET="$CONF/caelestia/hypr-user.lua"
+        WHY="Caelestia manages hyprland.lua and replaces it on updates; hypr-user.lua is yours and loads last."
+    elif [ -f "$CONF/hypr/hyprland.lua" ]; then
+        TARGET="$CONF/hypr/hyprland.lua"
+        WHY="This is your Hyprland config."
+    elif [ -f "$CONF/hypr/hyprland.conf" ]; then
+        echo "shtl needs Hyprland's Lua config (hyprland.lua), and you have the classic hyprland.conf."
+        echo "Hyprland 0.56+ reads ~/.config/hypr/hyprland.lua instead when it exists; see the Hyprland wiki."
+        exit 1
+    else
+        echo "No Hyprland config found in $CONF/hypr. Is Hyprland 0.56+ set up for this user?"
+        exit 1
+    fi
+}
+
+ask() { # ask "question" -> 0 for yes
+    printf '%s [y/N] ' "$1"
+    read -r answer
+    case $answer in [yY] | [yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+reload() {
+    if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] && command -v hyprctl >/dev/null; then
+        hyprctl reload >/dev/null && echo "Reloaded Hyprland."
+    else
+        echo "Reload Hyprland (or log in again) for it to take effect."
+    fi
+}
+
+setup() {
+    target
+    if grep -qF "$LINE" "$TARGET"; then
+        echo "shtl is already in $TARGET. Nothing to do."
+        exit 0
+    fi
+    echo "shtl setup adds two lines to the end of"
+    echo "    $TARGET"
+    echo "($WHY)"
+    echo
+    echo "    $MARK"
+    echo "    $LINE"
+    echo
+    echo "A copy of the file as it is now goes to $TARGET.before-shtl. Nothing else is changed."
+    ask "Add them?" || { echo "Nothing changed."; exit 0; }
+    cp -p "$TARGET" "$TARGET.before-shtl"
+    printf '\n%s\n%s\n' "$MARK" "$LINE" >>"$TARGET"
+    echo "Added."
+    reload
+    echo "Super+Space opens the panel; with it open, Super+, for settings."
+}
+
+undo() {
+    target
+    if ! grep -qF "$LINE" "$TARGET"; then
+        echo "shtl isn't in $TARGET. Nothing to do."
+        exit 0
+    fi
+    echo "This removes shtl's two lines from"
+    echo "    $TARGET"
+    ask "Remove them?" || { echo "Nothing changed."; exit 0; }
+    cp -p "$TARGET" "$TARGET.before-shtl-undo"
+    # drop shtl's lines and the blank line setup put before them; every other line stays as it was
+    awk -v mark="$MARK" -v line="$LINE" '
+        $0 == "" { blanks++; next }
+        $0 == mark { if (blanks > 0) blanks--; while (blanks > 0) { print ""; blanks-- } next }
+        $0 == line { next }
+        { while (blanks > 0) { print ""; blanks-- } print }
+        END { while (blanks > 0) { print ""; blanks-- } }' "$TARGET.before-shtl-undo" >"$TARGET"
+    echo "Removed (the file as it was is in $TARGET.before-shtl-undo)."
+    reload
+}
+
+case "$1 $2" in
+    "setup ") setup ;;
+    "setup --undo") undo ;;
+    "--version "*) echo "shtl $(sed -n 's/^P.version = "\(.*\)"/\1/p' "$CORE")" ;;
+    *) usage ;;
+esac

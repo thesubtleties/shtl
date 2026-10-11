@@ -11,7 +11,7 @@ Keyboard-first window placement for [Hyprland](https://hypr.land). Open the pane
 where** (a slot, a workspace, a screen) and your **right hand picks what** (a window or an app). Two keys, no
 mouse, no memorized chords: the panel shows what every key does right now.
 
-> **Early preview (v0.1.0).** It's used daily, but expect rough edges. Issues and ideas are welcome.
+> **Early preview (v0.1.1).** It's used daily, but expect rough edges. Issues and ideas are welcome.
 
 <!-- demo: a short screen recording goes here -->
 
@@ -46,16 +46,19 @@ behavior, your stars and blueprints.
 
 ## Install
 
-**Arch (AUR):** `paru -S shtl` (or your AUR helper of choice), then add one line to `~/.config/hypr/hyprland.lua`:
+**Arch (AUR):** `paru -S shtl` (or your AUR helper of choice), then:
 
-```lua
-dofile("/usr/share/shtl/hypr/shtl.lua")
+```sh
+shtl setup
 ```
 
-**From a checkout:** clone the repo anywhere and point that line at it, e.g.
-`dofile(os.getenv("HOME") .. "/src/shtl/hypr/shtl.lua")`.
+It shows the exact two lines it adds to your Hyprland config (Caelestia users: to `hypr-user.lua`, which
+Caelestia never overwrites), keeps a backup, and asks before changing anything. `shtl setup --undo` takes them out.
 
-Reload Hyprland (or log in again). shtl starts its own panel.
+**From a checkout:** clone the repo anywhere and run `bin/shtl setup` from it, or add the line yourself:
+`dofile("/path/to/shtl/hypr/shtl.lua")`.
+
+shtl starts its own panel once Hyprland reloads.
 
 ## Opening the panel
 
@@ -103,7 +106,7 @@ optional keyd setup above. Following your shell's colors reads Caelestia's palet
 
 ## Uninstall
 
-Remove the `dofile` line, `sudo pacman -R shtl` (or delete your checkout), and optionally `rm -r ~/.config/shtl`.
+`shtl setup --undo`, then `sudo pacman -R shtl` (or delete your checkout), and optionally `rm -r ~/.config/shtl`.
 If you set up keyd for it: `sudo rm /etc/keyd/shtl.conf && sudo systemctl restart keyd`.
 
 ## License

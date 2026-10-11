@@ -16,7 +16,7 @@ local here_dir = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
 local json = dofile(here_dir .. "json.lua")
 local P = {}
 shtl = P -- global, so `hyprctl eval` can reach it
-P.version = "0.1.0"
+P.version = "0.1.1"
 
 -- Blueprints are split trees: a leaf is a slot ({}); a node splits its box side by side ("h") or
 -- stacked ("v") at `ratio`. Slots are the leaves in order (A S D F), at most four. The settings window
@@ -336,6 +336,40 @@ local function apply(cfg, loading)
         end
     end
     return true
+end
+
+-- For the "hold" trigger: what keyd setup is in place (Settings shows what's missing and the commands).
+local function exists(path)
+    local f = io.open(path, "r")
+    if f then f:close() end
+    return f ~= nil
+end
+
+function P.keyd_status()
+    local user = os.getenv("USER") or ""
+    local in_group = false
+    local g = io.open("/etc/group", "r")
+    if g then
+        for line in g:lines() do
+            local name, members = line:match("^([^:]*):[^:]*:[^:]*:(.*)$")
+            if name == "keyd" then
+                for m in (members .. ","):gmatch("([^,]*),") do in_group = in_group or m == user end
+            end
+        end
+        g:close()
+    end
+    return {
+        installed = exists("/usr/bin/keyd") or exists("/usr/local/bin/keyd"),
+        config = exists("/etc/keyd/shtl.conf"),
+        running = (function() -- its socket can't be opened like a file, and exit codes don't reach Lua here
+            local f = io.popen("systemctl is-active keyd 2>/dev/null")
+            local out = f and f:read("*l")
+            if f then pcall(f.close, f) end
+            return out == "active"
+        end)(),
+        group = in_group,
+        conf = P.root and (P.root .. "extras/keyd/shtl.conf") or "extras/keyd/shtl.conf",
+    }
 end
 
 -- The settings window has the keyboard while it's open, so shtl steps out of its submap.
@@ -684,6 +718,7 @@ function P.publish(message)
         cfg.keys = {}
         for _, key in ipairs(P.app_keys) do table.insert(cfg.keys, { key = key, label = key_label(key) }) end
         cfg.apps, cfg.slot_keys, cfg.version = {}, P.slot_keys, P.version
+        cfg.keyd = P.keyd_status()
         local seen = {}
         for _, w in ipairs(mru_windows()) do
             if not seen[w.class] and w.class ~= "" then

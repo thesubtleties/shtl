@@ -636,12 +636,139 @@ PanelWindow {
                 Layout.fillHeight: true
                 spacing: 18
 
-                Repeater {
-                    model: [
-                        { key: "trigger", title: "Open shtl with",
+                OptionRow { modelData: ({ key: "trigger", title: "Open shtl with",
                           options: [{ v: "combo", l: "Key combo", d: (win.cfg ? win.cfg.trigger_combo : "SUPER + space") + " opens and closes the panel. Nothing else to install." },
                                     { v: "hold", l: "Hold Space", d: "Hold Space for the panel, tap it for a space. Needs keyd (runs as root); see the README." },
-                                    { v: "firmware", l: "Keyboard key", d: "Your keyboard sends " + (win.cfg ? win.cfg.trigger_firmware : "F13") + " while you hold a key (Wooting, QMK, ZMK)." }] },
+                                    { v: "firmware", l: "Keyboard key", d: "Your keyboard sends " + (win.cfg ? win.cfg.trigger_firmware : "F13") + " while you hold a key (Wooting, QMK, ZMK)." }] }) }
+
+                // Hold Space needs keyd: a card with what's in place and one command for what isn't
+                Rectangle {
+                    id: keydCard
+                    readonly property var k: win.cfg && win.cfg.keyd ? win.cfg.keyd : ({})
+                    readonly property bool ready: !!(k.installed && k.config && k.running && k.group)
+                    readonly property string command: {
+                        const steps = []
+                        if (!k.installed) steps.push("sudo pacman -S keyd")
+                        if (!k.config) steps.push("sudo cp '" + (k.conf || "") + "' /etc/keyd/shtl.conf")
+                        if (!k.running) steps.push("sudo systemctl enable --now keyd")
+                        else if (!k.config) steps.push("sudo systemctl restart keyd")
+                        if (!k.group) steps.push("sudo usermod -aG keyd \"$USER\"")
+                        return steps.join(" && ")
+                    }
+                    visible: !!win.cfg && win.cfg.trigger === "hold"
+                    Layout.leftMargin: 274
+                    Layout.topMargin: -6
+                    Layout.preferredWidth: 560
+                    implicitHeight: keydBody.implicitHeight + 28
+                    radius: win.theme.rad(9)
+                    color: win.theme.bg
+                    border.color: keydCard.ready ? win.theme.line : win.theme.goldEdge
+
+                    ColumnLayout {
+                        id: keydBody
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 14
+                        spacing: 10
+
+                        RowLayout {
+                            spacing: 8
+                            Rectangle { // a status dot: filled when ready
+                                implicitWidth: 8
+                                implicitHeight: 8
+                                radius: 4
+                                color: keydCard.ready ? win.theme.teal : "transparent"
+                                border.color: keydCard.ready ? win.theme.teal : win.theme.gold
+                                border.width: 1.5
+                            }
+                            T {
+                                text: keydCard.ready ? "keyd is ready: hold Space for the panel, tap it for a space"
+                                                     : "keyd setup"
+                                font.pixelSize: 13
+                                font.weight: Font.Medium
+                            }
+                        }
+
+                        Grid { // what's in place and what isn't
+                            visible: !keydCard.ready
+                            columns: 2
+                            columnSpacing: 22
+                            rowSpacing: 7
+                            Repeater {
+                                model: [
+                                    { ok: keydCard.k.installed, text: "Installed" },
+                                    { ok: keydCard.k.config, text: "shtl's file in /etc/keyd" },
+                                    { ok: keydCard.k.running, text: "Running" },
+                                    { ok: keydCard.k.group, text: "You're in the keyd group" },
+                                ]
+                                Row {
+                                    required property var modelData
+                                    spacing: 8
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 7
+                                        height: 7
+                                        radius: 3.5
+                                        color: modelData.ok ? win.theme.teal : "transparent"
+                                        border.color: modelData.ok ? win.theme.teal : win.theme.muted
+                                        border.width: 1.5
+                                    }
+                                    T {
+                                        text: modelData.text
+                                        color: modelData.ok ? win.theme.muted : win.theme.fg
+                                        font.pixelSize: 12
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle { // the missing steps as one command
+                            visible: !keydCard.ready
+                            Layout.fillWidth: true
+                            implicitHeight: commandText.implicitHeight + 16
+                            radius: win.theme.rad(7)
+                            color: win.theme.panel
+                            T {
+                                id: commandText
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                text: keydCard.command
+                                wrapMode: Text.WrapAnywhere
+                                color: win.theme.fg
+                                font.family: win.theme.mono
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        RowLayout {
+                            visible: !keydCard.ready
+                            Layout.fillWidth: true
+                            spacing: 8
+                            T {
+                                Layout.fillWidth: true
+                                text: keydCard.k.group ? "Run it in a terminal, then check again."
+                                                       : "Run it in a terminal, then log out and in for the group."
+                                color: win.theme.muted
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                            Button {
+                                label: "Check again"
+                                onClicked: win.theme.lua("shtl.publish()")
+                            }
+                            Button {
+                                label: copied.running ? "Copied" : "Copy command"
+                                primary: true
+                                onClicked: { Quickshell.execDetached(["wl-copy", keydCard.command]); copied.restart() }
+                                Timer { id: copied; interval: 1500 }
+                            }
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: [
                         { key: "hints", title: "Key hints in the panel",
                           options: [{ v: "show", l: "Show", d: "While you learn the keys" },
                                     { v: "hide", l: "Hide", d: "Once you know them" }] },
