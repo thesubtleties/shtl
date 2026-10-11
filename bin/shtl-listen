@@ -14,8 +14,8 @@ listen() {
 while :; do
     listen 2>/dev/null | while IFS= read -r line; do
         case $line in
-            +shtl | +penrose) hyprctl eval 'shtl.hold()' >/dev/null ;;      # (and an older layer name)
-            -shtl | -penrose) hyprctl eval 'shtl.release()' >/dev/null ;;
+            +shtl) hyprctl eval 'shtl.hold()' >/dev/null ;;
+            -shtl) hyprctl eval 'shtl.release()' >/dev/null ;;
         esac
     done
     sleep 2
